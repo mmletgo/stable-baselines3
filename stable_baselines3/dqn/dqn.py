@@ -1,4 +1,5 @@
 import warnings
+from copy import deepcopy
 from typing import Any, ClassVar, Optional, TypeVar, Union
 
 import numpy as np
@@ -100,6 +101,7 @@ class DQN(OffPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
+        sync_freq: int = 1000,
     ) -> None:
         super().__init__(
             policy,
@@ -136,13 +138,17 @@ class DQN(OffPolicyAlgorithm):
         self.max_grad_norm = max_grad_norm
         # "epsilon" for the epsilon-greedy exploration
         self.exploration_rate = 0.0
-
+        self.sync_freq = sync_freq
+        self.train_step_count = 0
         if _init_setup_model:
             self._setup_model()
 
     def _setup_model(self) -> None:
         super()._setup_model()
-        self._create_aliases()
+        self._create_aliases(self.policy)
+        self.train_policy = deepcopy(self.policy)
+        self.train_policy = self.train_policy.to(self.device)
+        self._create_aliases(self.train_policy)
         # Copy running stats, see GH issue #996
         self.batch_norm_stats = get_parameters_by_name(self.q_net, ["running_"])
         self.batch_norm_stats_target = get_parameters_by_name(self.q_net_target, ["running_"])
@@ -161,9 +167,9 @@ class DQN(OffPolicyAlgorithm):
                     f"which corresponds to {self.n_envs} steps."
                 )
 
-    def _create_aliases(self) -> None:
-        self.q_net = self.policy.q_net
-        self.q_net_target = self.policy.q_net_target
+    def _create_aliases(self, policy) -> None:
+        self.q_net = policy.q_net
+        self.q_net_target = policy.q_net_target
 
     def _on_step(self) -> None:
         """
@@ -183,9 +189,9 @@ class DQN(OffPolicyAlgorithm):
 
     def train(self, gradient_steps: int, batch_size: int = 100) -> None:
         # Switch to train mode (this affects batch norm / dropout)
-        self.policy.set_training_mode(True)
+        self.train_policy.set_training_mode(True)
         # Update learning rate according to schedule
-        self._update_learning_rate(self.policy.optimizer)
+        self._update_learning_rate(self.train_policy.optimizer)
 
         losses = []
         for _ in range(gradient_steps):
@@ -213,17 +219,26 @@ class DQN(OffPolicyAlgorithm):
             losses.append(loss.item())
 
             # Optimize the policy
-            self.policy.optimizer.zero_grad()
+            self.train_policy.optimizer.zero_grad()
             loss.backward()
             # Clip gradient norm
-            th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-            self.policy.optimizer.step()
+            th.nn.utils.clip_grad_norm_(self.train_policy.parameters(), self.max_grad_norm)
+            self.train_policy.optimizer.step()
 
         # Increase update counter
         self._n_updates += gradient_steps
 
         self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
         self.logger.record("train/loss", np.mean(losses))
+
+        self.train_step_count += 1
+        if self.train_step_count % self.sync_freq == 0:
+            with self._save_lock:
+                self.sync_policies()
+                # print(f"Sync policies at step {self.train_step_count}")
+
+    def sync_policies(self):
+        self.policy.load_state_dict(self.train_policy.state_dict())
 
     def predict(
         self,
@@ -252,7 +267,8 @@ class DQN(OffPolicyAlgorithm):
             else:
                 action = np.array(self.action_space.sample())
         else:
-            action, state = self.policy.predict(observation, state, episode_start, deterministic)
+            with self._save_lock:
+                action, state = self.policy.predict(observation, state, episode_start, deterministic)
         return action, state
 
     def learn(
