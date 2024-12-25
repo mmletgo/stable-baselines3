@@ -101,7 +101,7 @@ class DQN(OffPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
-        sync_freq: int = 1000,
+        sync_freq: int = 100,
     ) -> None:
         super().__init__(
             policy,
@@ -166,6 +166,7 @@ class DQN(OffPolicyAlgorithm):
                     "therefore the target network will be updated after each call to env.step() "
                     f"which corresponds to {self.n_envs} steps."
                 )
+        self.policy = self.policy.to("cpu")
 
     def _create_aliases(self, policy) -> None:
         self.q_net = policy.q_net
@@ -239,6 +240,7 @@ class DQN(OffPolicyAlgorithm):
 
     def sync_policies(self):
         self.policy.load_state_dict(self.train_policy.state_dict())
+        self.policy.to("cpu")
 
     def predict(
         self,

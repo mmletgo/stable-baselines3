@@ -1,5 +1,5 @@
 from typing import Any, ClassVar, Optional, TypeVar, Union
-
+from copy import deepcopy
 import numpy as np
 import torch as th
 from gymnasium import spaces
@@ -116,6 +116,7 @@ class SAC(OffPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
+        sync_freq: int = 1000,
     ):
         super().__init__(
             policy,
@@ -152,13 +153,17 @@ class SAC(OffPolicyAlgorithm):
         self.ent_coef = ent_coef
         self.target_update_interval = target_update_interval
         self.ent_coef_optimizer: Optional[th.optim.Adam] = None
-
+        self.sync_freq = sync_freq
+        self.train_step_count = 0
         if _init_setup_model:
             self._setup_model()
 
     def _setup_model(self) -> None:
         super()._setup_model()
-        self._create_aliases()
+        self._create_aliases(self.policy)
+        self.train_policy = deepcopy(self.policy)
+        self.train_policy = self.train_policy.to(self.device)
+        self._create_aliases(self.train_policy)
         # Running mean and running var
         self.batch_norm_stats = get_parameters_by_name(self.critic, ["running_"])
         self.batch_norm_stats_target = get_parameters_by_name(self.critic_target, ["running_"])
@@ -191,14 +196,14 @@ class SAC(OffPolicyAlgorithm):
             # is passed
             self.ent_coef_tensor = th.tensor(float(self.ent_coef), device=self.device)
 
-    def _create_aliases(self) -> None:
-        self.actor = self.policy.actor
-        self.critic = self.policy.critic
-        self.critic_target = self.policy.critic_target
+    def _create_aliases(self, policy) -> None:
+        self.actor = policy.actor
+        self.critic = policy.critic
+        self.critic_target = policy.critic_target
 
     def train(self, gradient_steps: int, batch_size: int = 64) -> None:
         # Switch to train mode (this affects batch norm / dropout)
-        self.policy.set_training_mode(True)
+        self.train_policy.set_training_mode(True)
         # Update optimizers learning rate
         optimizers = [self.actor.optimizer, self.critic.optimizer]
         if self.ent_coef_optimizer is not None:
@@ -294,6 +299,13 @@ class SAC(OffPolicyAlgorithm):
         self.logger.record("train/critic_loss", np.mean(critic_losses))
         if len(ent_coef_losses) > 0:
             self.logger.record("train/ent_coef_loss", np.mean(ent_coef_losses))
+        self.train_step_count += 1
+        if self.train_step_count % self.sync_freq == 0:
+            with self._save_lock:
+                self.sync_policies()
+
+    def sync_policies(self):
+        self.policy.load_state_dict(self.train_policy.state_dict())
 
     def learn(
         self: SelfSAC,
