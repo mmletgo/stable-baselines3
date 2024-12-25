@@ -166,7 +166,7 @@ class DQN(OffPolicyAlgorithm):
                     "therefore the target network will be updated after each call to env.step() "
                     f"which corresponds to {self.n_envs} steps."
                 )
-        self.policy = self.policy.to("cpu")
+        # self.policy = self.policy.to("cpu")
 
     def _create_aliases(self, policy) -> None:
         self.q_net = policy.q_net
