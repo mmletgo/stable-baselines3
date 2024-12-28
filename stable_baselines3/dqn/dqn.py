@@ -101,7 +101,7 @@ class DQN(OffPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
-        sync_freq: int = 100,
+        sync_freq: int = 1,
     ) -> None:
         super().__init__(
             policy,
@@ -240,7 +240,7 @@ class DQN(OffPolicyAlgorithm):
 
     def sync_policies(self):
         self.policy.load_state_dict(self.train_policy.state_dict())
-        self.policy.to("cpu")
+        # self.policy.to("cpu")
 
     def predict(
         self,

@@ -365,25 +365,25 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 break
             else:
                 time.sleep(0.01)
-        need_sleeptime = 0
+        # need_sleeptime = 0
         while not self.stop_training.is_set():
-            train_start_time = time.time()
+            # train_start_time = time.time()
             self.train(batch_size=self.batch_size, gradient_steps=gradient_steps)
-            train_needs_seconds = time.time() - train_start_time
-            time.sleep(need_sleeptime)
+            # train_needs_seconds = time.time() - train_start_time
+            # time.sleep(need_sleeptime)
             total_data_trained += self.batch_size * gradient_steps
             elapsed_time = time.time() - start_time
             if elapsed_time > 1:
                 data_per_second = total_data_trained / elapsed_time
                 self.logger.record("time/train_fps", data_per_second)
-                target_fps = self.logger.name_to_value.get("time/fps", 0) * 3
-                if target_fps > 0:
-                    if data_per_second > target_fps * 1.1:
-                        need_sleeptime += train_needs_seconds
-                    elif data_per_second < target_fps * 0.9:
-                        need_sleeptime -= train_needs_seconds
-                    if need_sleeptime < 0:
-                        need_sleeptime = 0
+                # target_fps = self.logger.name_to_value.get("time/fps", 0) * 3
+                # if target_fps > 0:
+                #     if data_per_second > target_fps * 1.1:
+                #         need_sleeptime += train_needs_seconds
+                #     elif data_per_second < target_fps * 0.9:
+                #         need_sleeptime -= train_needs_seconds
+                #     if need_sleeptime < 0:
+                #         need_sleeptime = 0
                 start_time = time.time()
                 total_data_trained = 0
 
